@@ -14,13 +14,12 @@ import google.auth
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-import telegram
-from telegram.ext import Application, Updater, CommandHandler
 
 _EST = timezone('US/Eastern')
-_SHEET_NAME = "C1 Weight, Nutrition, Steps"
-_EPOCH_ZERO = _EST.localize(dt.datetime(2023, 12, 4))
-_SHEETS_COL_ROW_PATTERN = r'([A-Za-z]+)(\d+)'
+_SHEET_NAME = os.environ.get("SHEET_NAME", "C1 Weight, Nutrition, Steps")
+_EPOCH_ZERO = _EST.localize(
+  dt.datetime.strptime(os.environ.get("EPOCH_ZERO", "2023-12-04"), "%Y-%m-%d")
+)
 
 NUM_DAYS_IN_WEEK = 7
 _WEIGHT = "WEIGHT"
@@ -29,13 +28,13 @@ _CALORIES = "CALORIES"
 _PROTEIN = "PROTEIN"
 
 _YESTERDAY_CATEGORIES = {
-  _STEPS: "B25",
-  _CALORIES: "B34",
-  _PROTEIN: "B43",
+  _STEPS: os.environ.get("STEPS_CELL", "B25"),
+  _CALORIES: os.environ.get("CALORIES_CELL", "B34"),
+  _PROTEIN: os.environ.get("PROTEIN_CELL", "B43"),
 }
 
 _TODAY_CATEGORIES = {
-  _WEIGHT: "B6",
+  _WEIGHT: os.environ.get("WEIGHT_CELL", "B6"),
 }
 
 _CATEGORIES_ORDER = [
@@ -95,7 +94,7 @@ def get_values(spreadsheet_id, range_name) -> str:
     )
   except HttpError as error:
     print(f"An error occurred: {error}")
-    return error
+    raise
 
   rows = result.get("values", [])
 
@@ -132,14 +131,14 @@ def update_values(spreadsheet_id, range_name, value_input_option, values):
     return result
   except HttpError as error:
     print(f"An error occurred: {error}")
-    return error
+    raise
 
 
-async def send_message(bot: telegram.Bot, msg: str, chat_id: str):
+async def send_message(bot: "telegram.Bot", msg: str, chat_id: str):
   await bot.send_message(chat_id=chat_id, text=msg)
 
 
-async def get_message_by_offset(bot: telegram.Bot, offset: int):
+async def get_message_by_offset(bot: "telegram.Bot", offset: int):
   """
   TODO: figure out what offset actually does
   """
@@ -208,6 +207,7 @@ async def sheets_get_values(
 ):
   os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = google_application_credentials_path  
   SHEETS_SPREADSHEET_ID = sheets_spreadsheet_id
+  import telegram
   bot = telegram.Bot(token=telegram_token)
 
   today = _EST.localize(dt.datetime.now())

@@ -7,11 +7,11 @@ import modal
 
 from sheets_get_values import sheets_get_values, construct_google_application_credentials
 
-image = modal.Image.debian_slim(python_version="3.8").pip_install_from_requirements(
+image = modal.Image.debian_slim(python_version="3.12").pip_install_from_requirements(
   "requirements.txt"
 )
 
-app = modal.App()
+app = modal.App("ts_fsc1_v1")
 
 @app.function(
   image=image,
