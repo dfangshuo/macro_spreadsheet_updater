@@ -16,7 +16,7 @@ from googleapiclient.errors import HttpError
 
 
 _EST = timezone('US/Eastern')
-_SHEET_NAME = os.environ.get("SHEET_NAME", "C1 Weight, Nutrition, Steps")
+_SHEET_NAME_DEFAULT = "C1 Weight, Nutrition, Steps"
 _EPOCH_ZERO = _EST.localize(
   dt.datetime.strptime(os.environ.get("EPOCH_ZERO", "2023-12-04"), "%Y-%m-%d")
 )
@@ -156,10 +156,11 @@ def get_or_update_cell(
   # TODO: docstring
   cell = get_cell(d, epoch_zero_cell, _EPOCH_ZERO)
   print(description, cell)
-  range_name = f"{_SHEET_NAME}!{cell}"
+  sheet_name = os.environ.get("SHEET_NAME", _SHEET_NAME_DEFAULT)
+  range_name = f"'{sheet_name}'!{cell}"
   value = get_values(spreadsheet_id, range_name)
   if value.strip() == "":
-    print(f'{description}: NO result!') 
+    print(f'{description}: NO result!')
     input_value = input_data.get(description, "")
     stripped_input = input_value.strip()
 
@@ -172,17 +173,27 @@ def get_or_update_cell(
       update_values(spreadsheet_id, range_name, "USER_ENTERED", [[input_value]])
 
     value = input_value
+  else:
+    input_value = input_data.get(description, "")
+    if input_value.strip():
+      if value.strip() == input_value.strip():
+        print(f'{description}: cell already has matching value "{value}"')
+      else:
+        print(f'{description}: cell already has value "{value}", input was "{input_value}" (not overwriting)')
 
   return value
   
 def construct_google_application_credentials(
-  project_id: str,
-  client_email: str,
-  client_x509_cert_url: str,
-  private_key_id: str, 
+  private_key_id: str,
   private_key: str,
   client_id: str,
+  project_id: str = None,
+  client_email: str = None,
+  client_x509_cert_url: str = None,
 ):
+  project_id = project_id or os.environ.get('PROJECT_ID', '')
+  client_email = client_email or os.environ.get('CLIENT_EMAIL', '')
+  client_x509_cert_url = client_x509_cert_url or os.environ.get('CLIENT_X509_CERT_URL', '')
   return {
     "type": "service_account",
     "project_id": project_id,
@@ -199,34 +210,39 @@ def construct_google_application_credentials(
 
 
 async def sheets_get_values(
-  telegram_token: str, 
-  sheets_spreadsheet_id: str, 
-  google_application_credentials_path: str, 
+  telegram_token: str,
+  sheets_spreadsheet_id: str,
+  google_application_credentials_path: str,
   telegram_write_chat_id: str,
-  dry_run: bool = True
+  dry_run: bool = True,
+  input_data: dict = None,
 ):
-  os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = google_application_credentials_path  
+  os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = google_application_credentials_path
   SHEETS_SPREADSHEET_ID = sheets_spreadsheet_id
-  import telegram
-  bot = telegram.Bot(token=telegram_token)
 
   today = _EST.localize(dt.datetime.now())
   # In UTC, depending on when we trigger this run, we may or may not have
   # to subtract a day. Right now this logic lives in `modal_dispatch.py`
   run_date = today - dt.timedelta(days=1)
 
-  # Get latest (-1) input
-  msg = await get_message_by_offset(bot, -1)
-  _input = msg.text
-  _input_array = _input.split()
+  import telegram
+  bot = telegram.Bot(token=telegram_token) if telegram_token else None
 
-  if len(_input_array) == _EXPECTED_INPUT_ARRAY_LEN:
-    input_data = {
-      tup[0]: tup[1] for tup in zip(_CATEGORIES_ORDER, _input_array)
-    }
+  if input_data is not None:
+    print(f'Using provided input_data: {input_data}')
   else:
-    print(f"Got unexpected input {_input}, discarding...")
-    input_data = {}
+    # Get latest (-1) input
+    msg = await get_message_by_offset(bot, -1)
+    _input = msg.text
+    _input_array = _input.split()
+
+    if len(_input_array) == _EXPECTED_INPUT_ARRAY_LEN:
+      input_data = {
+        tup[0]: tup[1] for tup in zip(_CATEGORIES_ORDER, _input_array)
+      }
+    else:
+      print(f"Got unexpected input {_input}, discarding...")
+      input_data = {}
 
   print(f'input data: {input_data}')
 
@@ -263,11 +279,16 @@ async def sheets_get_values(
   #     print(cell)
 
   message = f"{run_date.day}/{run_date.month}\n{result_str}"
-  if dry_run:
+  if bot is None:
+    print(f'\nSkipping Telegram post (called via endpoint)\n')
+    print(message)
+  elif dry_run:
     print('\ndry_run=True\n')
     print(message)
   else:
     await send_message(bot, message, telegram_write_chat_id)
+
+  return message
     
 
 if __name__ == "__main__":
